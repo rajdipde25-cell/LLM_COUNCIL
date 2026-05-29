@@ -15,6 +15,7 @@ export interface CompletionOptions {
   tools?: ChatToolDefinition[];
   tool_choice?: ChatToolChoice;
   parallel_tool_calls?: boolean;
+  signal?: AbortSignal;
 }
 
 export abstract class BaseProvider {
@@ -41,9 +42,17 @@ export abstract class BaseProvider {
     url: string,
     init: RequestInit,
     timeoutMs = 15000,
+    signal?: AbortSignal,
   ): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    if (signal) {
+      if (signal.aborted) {
+        controller.abort();
+      } else {
+        signal.addEventListener('abort', () => controller.abort());
+      }
+    }
     try {
       return await fetch(url, { ...init, signal: controller.signal });
     } finally {

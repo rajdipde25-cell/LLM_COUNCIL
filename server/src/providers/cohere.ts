@@ -34,7 +34,7 @@ export class CohereProvider extends BaseProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-    });
+    }, undefined, options?.signal);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -70,7 +70,7 @@ export class CohereProvider extends BaseProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-    });
+    }, undefined, options?.signal);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

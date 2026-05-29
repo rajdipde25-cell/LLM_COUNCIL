@@ -67,6 +67,48 @@ function toGeminiFinishReason(finishReason?: string): string {
   return 'stop';
 }
 
+function cleanGeminiSchema(schema: any, isPropertiesMap = false): any {
+  if (!schema || typeof schema !== 'object') return schema;
+
+  if (Array.isArray(schema)) {
+    return schema.map(item => cleanGeminiSchema(item, false));
+  }
+
+  const cleaned: Record<string, any> = {};
+  
+  if (isPropertiesMap) {
+    for (const [key, value] of Object.entries(schema)) {
+      cleaned[key] = cleanGeminiSchema(value, false);
+    }
+    return cleaned;
+  }
+
+  // Supported fields by Gemini Schema
+  const allowedKeys = new Set([
+    'type',
+    'description',
+    'enum',
+    'properties',
+    'required',
+    'items',
+    'format',
+    'nullable',
+    'default'
+  ]);
+
+  for (const [key, value] of Object.entries(schema)) {
+    if (allowedKeys.has(key)) {
+      if (key === 'properties') {
+        cleaned[key] = cleanGeminiSchema(value, true);
+      } else {
+        cleaned[key] = cleanGeminiSchema(value, false);
+      }
+    }
+  }
+
+  return cleaned;
+}
+
 function toGeminiTools(tools?: ChatToolDefinition[]): Array<{ functionDeclarations: Array<Record<string, unknown>> }> | undefined {
   if (!tools || tools.length === 0) return undefined;
 
@@ -74,10 +116,11 @@ function toGeminiTools(tools?: ChatToolDefinition[]): Array<{ functionDeclaratio
     functionDeclarations: tools.map(t => ({
       name: t.function.name,
       description: t.function.description,
-      parameters: t.function.parameters,
+      parameters: cleanGeminiSchema(t.function.parameters),
     })),
   }];
 }
+
 
 function toGeminiToolConfig(toolChoice?: ChatToolChoice): { functionCallingConfig: Record<string, unknown> } | undefined {
   if (!toolChoice) return undefined;
@@ -125,7 +168,10 @@ function toGeminiContents(messages: ChatMessage[]) {
 
         for (const call of m.tool_calls ?? []) {
           parts.push({
-            thoughtSignature: call.thought_signature,
+            // Gemini 2.0+ requires thoughtSignature on functionCall parts.
+            // If the upstream client didn't provide one, inject a placeholder
+            // so the API doesn't reject with a 400 error.
+            thoughtSignature: call.thought_signature || 'internal_thought_placeholder',
             functionCall: {
               id: call.id,
               name: call.function.name,
@@ -235,7 +281,7 @@ export class GoogleProvider extends BaseProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    }, undefined, options?.signal);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -298,7 +344,7 @@ export class GoogleProvider extends BaseProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    }, undefined, options?.signal);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

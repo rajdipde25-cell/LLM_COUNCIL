@@ -236,3 +236,28 @@ analyticsRouter.get('/errors', (req: Request, res: Response) => {
     createdAt: r.created_at,
   })));
 });
+
+// Recent successful completions (last 5)
+analyticsRouter.get('/successes', (req: Request, res: Response) => {
+  const range = (req.query.range as string) ?? '7d';
+  const since = getSinceTimestamp(range);
+  const db = getDb();
+
+  const rows = db.prepare(`
+    SELECT id, platform, model_id, input_tokens, output_tokens, latency_ms, created_at
+    FROM requests
+    WHERE status = 'success' AND created_at >= ?
+    ORDER BY created_at DESC
+    LIMIT 5
+  `).all(since) as any[];
+
+  res.json(rows.map(r => ({
+    id: r.id,
+    platform: r.platform,
+    modelId: r.model_id,
+    inputTokens: r.input_tokens,
+    outputTokens: r.output_tokens,
+    latencyMs: r.latency_ms,
+    createdAt: r.created_at,
+  })));
+});

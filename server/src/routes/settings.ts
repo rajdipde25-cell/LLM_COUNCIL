@@ -14,3 +14,9 @@ settingsRouter.post('/api-key/regenerate', (_req: Request, res: Response) => {
   const newKey = regenerateUnifiedKey();
   res.json({ apiKey: newKey });
 });
+
+// Get authentication requirement status
+settingsRouter.get('/auth-status', (_req: Request, res: Response) => {
+  res.json({ passwordRequired: false });
+});
+

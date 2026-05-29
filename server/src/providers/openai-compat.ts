@@ -61,7 +61,7 @@ export class OpenAICompatProvider extends BaseProvider {
         tool_choice: options?.tool_choice,
         parallel_tool_calls: options?.parallel_tool_calls,
       }),
-    }, this.timeoutMs);
+    }, this.timeoutMs, options?.signal);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -98,7 +98,7 @@ export class OpenAICompatProvider extends BaseProvider {
         parallel_tool_calls: options?.parallel_tool_calls,
         stream: true,
       }),
-    }, this.timeoutMs);
+    }, this.timeoutMs, options?.signal);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

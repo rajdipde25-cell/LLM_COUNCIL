@@ -131,21 +131,130 @@ export function getAllPenalties(): Array<{ modelDbId: number; count: number; pen
  * @param skipKeys - set of "platform:modelId:keyId" to skip (failed on this request)
  * @param preferredModelDbId - try this model first (sticky session)
  */
-export function routeRequest(estimatedTokens = 1000, skipKeys?: Set<string>, preferredModelDbId?: number): RouteResult {
+function isCodingModel(platform: string, modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return id.includes('coder') || id.includes('codestral') || id.includes('code');
+}
+
+/**
+ * Route a request to the best available model.
+ * Models are sorted by (base_priority + rate_limit_penalty) so frequently
+ * rate-limited models automatically sink below working ones.
+ *
+ * If preferredModelDbId is set, that model gets tried FIRST (sticky sessions).
+ * This prevents hallucination from model switching mid-conversation.
+ *
+ * @param estimatedTokens - estimated total tokens for rate limit check
+ * @param skipKeys - set of "platform:modelId:keyId" to skip (failed on this request)
+ * @param preferredModelDbId - try this model first (sticky session)
+ * @param isCoding - set to true if the query is a coding task
+ */
+export function routeRequest(
+  estimatedTokens = 1000, 
+  skipKeys?: Set<string>, 
+  preferredModelDbId?: number,
+  isCoding = false
+): RouteResult {
   const db = getDb();
 
   // Get fallback chain ordered by priority
   const fallbackChain = db.prepare(`
-    SELECT fc.model_db_id, fc.priority, fc.enabled
+    SELECT fc.model_db_id, fc.priority, fc.enabled, m.platform, m.model_id, m.size_label, m.intelligence_rank
     FROM fallback_config fc
+    LEFT JOIN models m ON fc.model_db_id = m.id
     ORDER BY fc.priority ASC
-  `).all() as FallbackRow[];
+  `).all() as (FallbackRow & { platform: string; model_id: string; size_label: string; intelligence_rank: number })[];
 
   // Apply dynamic penalties: sort by (base priority + penalty)
-  const sortedChain = fallbackChain.map(entry => ({
+  let sortedChain = fallbackChain.map(entry => ({
     ...entry,
     effectivePriority: entry.priority + getPenalty(entry.model_db_id),
   })).sort((a, b) => a.effectivePriority - b.effectivePriority);
+
+  // Extract most recently failed model category and rank
+  let failedModelDetails: { size_label: string; intelligence_rank: number } | undefined;
+
+  // Filter out models that have already failed during this request
+  if (skipKeys && skipKeys.size > 0) {
+    sortedChain = sortedChain.filter(entry => {
+      for (const skipId of skipKeys) {
+        const parts = skipId.split(':');
+        if (parts.length >= 3) {
+          const skipPlatform = parts[0];
+          const skipModelId = parts.slice(1, -1).join(':');
+          if (skipPlatform === entry.platform && skipModelId === entry.model_id) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+
+    const lastSkipId = Array.from(skipKeys).pop()!;
+    const parts = lastSkipId.split(':');
+    if (parts.length >= 3) {
+      const failedPlatform = parts[0];
+      const failedModelId = parts.slice(1, -1).join(':');
+      const failedModel = db.prepare('SELECT size_label, intelligence_rank FROM models WHERE platform = ? AND model_id = ?').get(failedPlatform, failedModelId) as { size_label: string; intelligence_rank: number } | undefined;
+      if (failedModel) {
+        failedModelDetails = failedModel;
+      }
+    }
+  }
+
+  // Smart Routing: if estimatedTokens > 8000, skip 'small' models (like GitHub Models or Groq)
+  // and prioritize large-context models like Gemini.
+  if (estimatedTokens > 8000) {
+    sortedChain = sortedChain.filter(entry => entry.platform !== 'github' && entry.platform !== 'groq');
+  }
+
+  // Apply custom sorting rules depending on the task type
+  if (isCoding) {
+    sortedChain.sort((a, b) => {
+      const aIsCoder = isCodingModel(a.platform, a.model_id);
+      const bIsCoder = isCodingModel(b.platform, b.model_id);
+
+      // 1. Prioritize coding-specific models
+      if (aIsCoder && !bIsCoder) return -1;
+      if (!aIsCoder && bIsCoder) return 1;
+
+      // 2. Prioritize high intelligence general models as fallbacks
+      if (!aIsCoder && !bIsCoder) {
+        const aIsFrontier = a.intelligence_rank <= 4;
+        const bIsFrontier = b.intelligence_rank <= 4;
+        if (aIsFrontier && !bIsFrontier) return -1;
+        if (!aIsFrontier && bIsFrontier) return 1;
+      }
+
+      // 3. Fall back to effectivePriority
+      return a.effectivePriority - b.effectivePriority;
+    });
+  } else {
+    sortedChain.sort((a, b) => {
+      // 1. Google (Gemini) prioritization if estimatedTokens > 8000
+      if (estimatedTokens > 8000) {
+        const aIsGoogle = a.platform === 'google';
+        const bIsGoogle = b.platform === 'google';
+        if (aIsGoogle && !bIsGoogle) return -1;
+        if (!aIsGoogle && bIsGoogle) return 1;
+      }
+
+      // 2. Similarity sorting if we have a failed model
+      if (failedModelDetails) {
+        const aMatchesCategory = a.size_label === failedModelDetails.size_label;
+        const bMatchesCategory = b.size_label === failedModelDetails.size_label;
+        if (aMatchesCategory && !bMatchesCategory) return -1;
+        if (!aMatchesCategory && bMatchesCategory) return 1;
+
+        const aDiff = Math.abs(a.intelligence_rank - failedModelDetails.intelligence_rank);
+        const bDiff = Math.abs(b.intelligence_rank - failedModelDetails.intelligence_rank);
+        if (aDiff !== bDiff) return aDiff - bDiff;
+      }
+
+      // 3. Fall back to effectivePriority
+      return a.effectivePriority - b.effectivePriority;
+    });
+  }
 
   // Sticky session: move preferred model to front of chain
   if (preferredModelDbId) {

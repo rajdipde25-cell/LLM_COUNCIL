@@ -174,4 +174,57 @@ describe('Full Integration Flow', () => {
     expect(body.error.code).toBe('model_not_found');
     expect(body.error.message).toContain('is disabled');
   });
+
+  it('Step 13: 413 error is retryable, sets 5-minute cooldown, and logs 0 tokens', async () => {
+    const db = getDb();
+    db.prepare('DELETE FROM api_keys').run();
+    db.prepare('DELETE FROM requests').run();
+
+    // Add a Groq key
+    await req(app, 'POST', '/api/keys', {
+      platform: 'groq',
+      key: 'gsk_cooldown_test_key',
+      label: 'Cooldown Test',
+    });
+
+    const keys = db.prepare("SELECT * FROM api_keys WHERE platform = 'groq'").all() as any[];
+    const keyId = keys[0].id;
+
+    // Mock fetch to simulate a 413 error
+    const origFetch = global.fetch;
+    vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const urlStr = typeof url === 'string' ? url : url.toString();
+      if (urlStr.includes('api.groq.com')) {
+        return {
+          ok: false,
+          status: 413,
+          statusText: 'Payload Too Large',
+          json: () => Promise.resolve({ error: { message: 'Payload Too Large' } }),
+        } as any;
+      }
+      return origFetch(url, init);
+    });
+
+    const { status } = await req(app, 'POST', '/v1/chat/completions', {
+      messages: [{ role: 'user', content: 'hello large message' }],
+    });
+
+    expect([502, 429]).toContain(status);
+
+    // Verify requests logged 0 tokens in the database
+    const loggedRequests = db.prepare('SELECT * FROM requests').all() as any[];
+    expect(loggedRequests.length).toBeGreaterThan(0);
+    for (const r of loggedRequests) {
+      expect(r.input_tokens).toBe(0);
+      expect(r.output_tokens).toBe(0);
+      expect(r.status).toBe('error');
+    }
+
+    // Verify the key is on cooldown (since we can check cooldowns in ratelimit.ts)
+    const { isOnCooldown } = await import('../../services/ratelimit.js');
+    const routedModelId = loggedRequests[0].model_id;
+    expect(isOnCooldown('groq', routedModelId, keyId)).toBe(true);
+
+    vi.restoreAllMocks();
+  });
 });

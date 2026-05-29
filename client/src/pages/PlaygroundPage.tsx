@@ -4,6 +4,7 @@ import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHeader } from '@/components/page-header'
+import { AlertCircle } from 'lucide-react'
 
 interface FallbackEntry {
   modelDbId: number
@@ -35,10 +36,23 @@ export default function PlaygroundPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const { data: keyData } = useQuery<{ apiKey: string }>({
+  const { data: keyData, refetch } = useQuery<{ apiKey: string }>({
     queryKey: ['unified-key'],
     queryFn: () => apiFetch('/api/settings/api-key'),
+    retry: false,
   })
+
+  useEffect(() => {
+    const handleUnlocked = () => {
+      refetch()
+    }
+    window.addEventListener('freellmapi_unlocked', handleUnlocked)
+    return () => {
+      window.removeEventListener('freellmapi_unlocked', handleUnlocked)
+    }
+  }, [refetch])
+
+  const isLocked = !keyData?.apiKey
 
   const { data: fallbackEntries = [] } = useQuery<FallbackEntry[]>({
     queryKey: ['fallback'],
@@ -66,11 +80,11 @@ export default function PlaygroundPage() {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (keyData?.apiKey) headers['Authorization'] = `Bearer ${keyData.apiKey}`
 
-      const body: any = {
+      const body: { messages: Array<{ role: string; content: string }>; model?: string } = {
         messages: newMessages.map(m => ({ role: m.role, content: m.content })),
       }
       if (selectedModel !== 'auto') body.model = selectedModel
-
+      
       const base = import.meta.env.BASE_URL.replace(/\/$/, '')
       const start = Date.now()
       const res = await fetch(`${base}/v1/chat/completions`, {
@@ -109,10 +123,11 @@ export default function PlaygroundPage() {
           fallbackAttempts: fallbackAttempts ? parseInt(fallbackAttempts) : undefined,
         },
       }])
-    } catch (err: any) {
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err)
       setMessages([...newMessages, {
         role: 'assistant',
-        content: `Error: ${err.message}`,
+        content: `Error: ${errorMsg}`,
       }])
     } finally {
       setLoading(false)
@@ -221,15 +236,32 @@ export default function PlaygroundPage() {
         </div>
 
         <div className="border-t bg-background/50 p-3">
+          {isLocked && (
+            <div className="flex items-center justify-between gap-3 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-lg px-4 py-2.5 text-xs font-semibold mb-3">
+              <span className="flex items-center gap-1.5">
+                <AlertCircle size={14} />
+                Playground is disabled in read-only demo mode. Unlock on the Keys page to test prompt completions.
+              </span>
+              <Button 
+                variant="outline" 
+                size="xs" 
+                onClick={() => window.location.href = '/keys'} 
+                className="text-rose-500 border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/10 h-7"
+              >
+                Go to Keys Page
+              </Button>
+            </div>
+          )}
           <div className="flex gap-2 items-end">
             <textarea
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message… (⏎ to send, ⇧⏎ for newline)"
+              placeholder={isLocked ? "Playground is locked in preview mode..." : "Type a message… (⏎ to send, ⇧⏎ for newline)"}
+              disabled={isLocked}
               rows={1}
-              className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50 min-h-[40px] max-h-[160px]"
+              className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50 min-h-[40px] max-h-[160px] disabled:opacity-50"
               style={{ height: 'auto', overflow: 'hidden' }}
               onInput={e => {
                 const el = e.target as HTMLTextAreaElement
@@ -237,7 +269,7 @@ export default function PlaygroundPage() {
                 el.style.height = Math.min(el.scrollHeight, 160) + 'px'
               }}
             />
-            <Button onClick={handleSend} disabled={loading || !input.trim()} size="default">
+            <Button onClick={handleSend} disabled={isLocked || loading || !input.trim()} size="default">
               {loading ? 'Sending…' : 'Send'}
             </Button>
           </div>
