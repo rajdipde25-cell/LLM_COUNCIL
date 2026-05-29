@@ -1,4 +1,4 @@
-$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "C:\Users\rajdi\freellmapi\background_manager.vbs"
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "C:\Users\rajdi\llm_council\background_manager.vbs"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet
 $settings.DisallowStartIfOnBatteries = $false

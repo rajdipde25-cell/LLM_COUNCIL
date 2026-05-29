@@ -1,5 +1,5 @@
 const Database = require('better-sqlite3');
-const db = new Database('C:/Users/rajdi/freellmapi/server/data/freeapi.db');
+const db = new Database('C:/Users/rajdi/llm_council/server/data/freeapi.db');
 
 try {
   console.log("=== RECENT ERRORS IN REQUESTS LOGS ===");

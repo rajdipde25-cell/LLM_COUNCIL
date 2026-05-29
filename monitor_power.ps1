@@ -1,4 +1,4 @@
-$projectPath = "C:\Users\rajdi\freellmapi"
+$projectPath = "C:\Users\rajdi\llm_council"
 $batteryMinutes = 0
 
 # Ensure the log file is created in a temp folder or project folder
@@ -27,7 +27,7 @@ while ($true) {
     $nodeProcesses = Get-CimInstance -ClassName Win32_Process -Filter "Name = 'node.exe'"
     $isRunning = $false
     foreach ($p in $nodeProcesses) {
-        if ($p.CommandLine -and ($p.CommandLine -like "*freellmapi*" -or $p.CommandLine -like "*llm_council*")) {
+        if ($p.CommandLine -and ($p.CommandLine -like "*llm_council*" -or $p.CommandLine -like "*llm_council*")) {
             $isRunning = $true
         }
     }
@@ -48,7 +48,7 @@ while ($true) {
             if ($isRunning) {
                 "Running on battery for 5+ minutes. Stopping server..." | Out-File -FilePath $logFile -Append
                 foreach ($p in $nodeProcesses) {
-                    if ($p.CommandLine -and ($p.CommandLine -like "*freellmapi*" -or $p.CommandLine -like "*llm_council*")) {
+                    if ($p.CommandLine -and ($p.CommandLine -like "*llm_council*" -or $p.CommandLine -like "*llm_council*")) {
                         Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
                     }
                 }

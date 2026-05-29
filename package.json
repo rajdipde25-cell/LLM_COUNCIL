@@ -1,5 +1,5 @@
 {
-  "name": "freellmapi",
+  "name": "llm_council",
   "private": true,
   "workspaces": [
     "shared",

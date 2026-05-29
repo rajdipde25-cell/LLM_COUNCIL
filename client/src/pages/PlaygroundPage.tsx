@@ -46,9 +46,9 @@ export default function PlaygroundPage() {
     const handleUnlocked = () => {
       refetch()
     }
-    window.addEventListener('freellmapi_unlocked', handleUnlocked)
+    window.addEventListener('llm_council_unlocked', handleUnlocked)
     return () => {
-      window.removeEventListener('freellmapi_unlocked', handleUnlocked)
+      window.removeEventListener('llm_council_unlocked', handleUnlocked)
     }
   }, [refetch])
 
